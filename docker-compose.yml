@@ -1,0 +1,17 @@
+version: '2.0'
+services:
+  synced_player:
+    build: .
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:18973:8000"
+    volumes:
+      - ./static/media:/app/static/media
+      # - ./deno.jsonc:/app/deno.jsonc
+    logging:
+        driver: "json-file"
+        options:
+            max-file: "2"
+            max-size: "10m"
+# updated
