@@ -157,6 +157,10 @@
                     cfg.sources = sources;
                     await setConfig();
                 }));
+                document.querySelector("#btn-change-source").addEventListener("click", () => withLoadingDialog(async () => {
+                    // change video source
+                    document.querySelector("#video").src = document.querySelector("#vdosor").value
+                }));
                 document.querySelector("#btn-sync-to-srv").addEventListener("click", () => withLoadingDialog(async () => {
                     // sync config to server
                     localToCfg((video.paused) ? true : false);
@@ -230,7 +234,7 @@
         <label class="mt">Video Source 视频源 (local 本地):</label>
         <div class="mt" style="display: flex; gap: 0.5rem; max-width: 100%; width: 40rem;">
             <input id="vdosor" style="flex: 1 1 auto;" placeholder="Video Source 视频源" />
-            <button style="flex: 0 0 auto;">Change 切换</button>
+            <button style="flex: 0 0 auto;" id="btn-change-source">Change 切换</button>
         </div>
         <video class="mt" id="video" style="max-width: 100%; height: 22.5rem; width: 40rem;" controls></video>
         <div class="mt" style="display: flex; gap: 0.5rem;">
