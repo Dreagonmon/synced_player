@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <title>Synced Player 同步播放器</title>
+        <style>
+            * {
+                padding: 0;
+                margin: 0;
+                box-sizing: border-box;
+            }
+            html, body {
+                width: 100%;
+                height: 100%;
+            }
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            button {
+                padding: 0.5rem;
+                background-color: #08D;
+                color: white;
+                border-width: 0;
+                border-radius: 0.5rem;
+                font-size: 1rem;
+                cursor: pointer;
+            }
+            textarea, input {
+                padding: 0.25rem;
+                border-radius: 0.5rem;
+                border-style: solid;
+            }
+            textarea, pre, code {
+                font-family: monospace;
+            }
+            hr {
+                width: 100%;
+                border: none;
+                border-top: 0.5rem double #08D;
+                color: #333;
+                overflow: hidden;
+                text-align: center;
+                height: 0.5rem;
+            }
+            .dialog {
+                position: fixed;
+                border: none;
+                margin: 0;
+                padding: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                width: 100%;
+                height: 100%;
+            }
+            .hidden {
+                display: none;
+            }
+            .dialog_outter {
+                width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .dialog_inner {
+                width: fit-content;
+                height: 100%;
+                display: flex;
+                align-items: center;
+            }
+            .mt {
+                margin-top: 0.5rem;
+            }
+        </style>
+        <script type="module">
+            const encoder = new TextEncoder();
+            const bufferToBinString = (buffer) => {
+                return [...new Uint8Array(buffer)]
+                    .map(x => String.fromCharCode(x))
+                    .join("");
+            };
+            const sha256 = async (content) => {
+                return await window.crypto.subtle.digest(
+                    "SHA-256",
+                    typeof content === "string" ? encoder.encode(content) : content,
+                );
+            };
+            const hashStringKey = async key => btoa(bufferToBinString(await sha256(`KeYs${key}X`)));
+            const withLoadingDialog = async (task) => {
+                const dialog = document.querySelector("#dialog_loading");
+                if (dialog.classList.contains("hidden")) dialog.classList.remove("hidden");
+                try {
+                    const result = task();
+                    if (result instanceof Promise) {
+                        return await result;
+                    } else {
+                        return result;
+                    }
+                } finally {
+                    if (!dialog.classList.contains("hidden")) dialog.classList.add("hidden");
+                }
+            }
+            window.addEventListener("load", async () => {
+                document.querySelector("#btn-create").addEventListener("click", () => withLoadingDialog(async () => {
+                    const pwd = document.querySelector("#admpwd").value;
+                    if (!pwd) {
+                        return;
+                    }
+                    const hashPwd = await hashStringKey(pwd);
+                    const resp = await fetch(
+                        "/api/createRoom",
+                        {
+                            method: "POST",
+                            body: JSON.stringify({
+                                pwd: hashPwd,
+                            }),
+                            headers: {
+                                "Content-Type": "application/json",
+                            }
+                        }
+                    )
+                    const data = await resp.json();
+                    const roomId = data?.data?.roomId;
+                    const c = new URL(globalThis.location.href);
+                    const url = new URL(`${c.protocol}//${c.host}/manager_room.html`);
+                    url.searchParams.set("roomId", roomId);
+                    url.hash = `#${hashPwd}`;
+                    globalThis.location = url.toString();
+                }));
+                document.querySelector("#btn-visit").addEventListener("click", () => {
+                    const rid = document.querySelector("#romid").value;
+                    if (!rid) {
+                        return;
+                    }
+                    // force to use http for better resource loading.
+                    const c = new URL(globalThis.location.href);
+                    const url = new URL(`http://${c.host}/player.html`);
+                    url.searchParams.set("roomId", rid);
+                    globalThis.location = url.toString();
+                    console.log(rid);
+                });
+                document.querySelector("#btn-visit-adm").addEventListener("click", async () => {
+                    const rid = document.querySelector("#romid").value;
+                    const pwd = document.querySelector("#admpwd2").value;
+                    if (!rid || !pwd) {
+                        return;
+                    }
+                    const hashPwd = await hashStringKey(pwd);
+                    // force to use http for better resource loading.
+                    const c = new URL(globalThis.location.href);
+                    const url = new URL(`http://${c.host}/manager_room.html`);
+                    url.searchParams.set("roomId", rid);
+                    url.hash = `#${hashPwd}`;
+                    globalThis.location = url.toString();
+                    console.log(rid);
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <hr class="mt" />
+        <h1>Create Room 创建房间</h1>
+        <label class="mt">Admin Password 管理员密码:</label>
+        <input type="password" id="admpwd" placeholder="Admin Password 管理员密码" />
+        <button class="mt" id="btn-create">Create 创建</button>
+        <hr class="mt" />
+        <h1>Visit Room 访问房间</h1>
+        <label class="mt">Room ID 房间ID:</label>
+        <input id="romid" placeholder="Room ID 房间ID" />
+        <button class="mt" id="btn-visit">Visit 访问</button>
+        <label class="mt">Admin Password 管理员密码:</label>
+        <input type="password" id="admpwd2" placeholder="Admin Password 管理员密码" />
+        <button class="mt" id="btn-visit-adm">Visit Admin Panel 访问管理员界面</button>
+        <!-- Loading Dialog -->
+        <div class="dialog hidden" id="dialog_loading">
+            <div class="dialog_outter">
+                <div class="dialog_inner">
+                    <div style="padding: 1rem; background-color: #FFF; color: #000; border: #000 0.25rem solid;">Loading 加载中...</div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <title>Manage Room 管理房间</title>
+        <style>
+            * {
+                padding: 0;
+                margin: 0;
+                box-sizing: border-box;
+            }
+            html, body {
+                width: 100%;
+                height: 100%;
+            }
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            button {
+                padding: 0.5rem;
+                background-color: #08D;
+                color: white;
+                border-width: 0;
+                border-radius: 0.5rem;
+                font-size: 1rem;
+                cursor: pointer;
+            }
+            textarea, input {
+                padding: 0.25rem;
+                border-radius: 0.5rem;
+                border-style: solid;
+            }
+            textarea, pre, code {
+                font-family: monospace;
+            }
+            hr {
+                width: 100%;
+                border: none;
+                border-top: 0.5rem double #08D;
+                color: #333;
+                overflow: hidden;
+                text-align: center;
+                height: 0.5rem;
+            }
+            .dialog {
+                position: fixed;
+                border: none;
+                margin: 0;
+                padding: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                width: 100%;
+                height: 100%;
+            }
+            .hidden {
+                display: none;
+            }
+            .dialog_outter {
+                width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .dialog_inner {
+                width: fit-content;
+                height: 100%;
+                display: flex;
+                align-items: center;
+            }
+            .mt {
+                margin-top: 0.5rem;
+            }
+        </style>
+        <script type="module">
+            const thisURL = new URL(globalThis.location.href);
+            const roomId = thisURL.searchParams.get("roomId") ?? "U";
+            const adminPassword = thisURL.hash.substring(1);
+            let cfg = {
+                sources: [],
+                /** @type {"paused" | "playing"} */
+                state: "paused",
+                timeMs: Date.now(),
+            };
+
+            const withLoadingDialog = async (task) => {
+                const dialog = document.querySelector("#dialog_loading");
+                if (dialog.classList.contains("hidden")) dialog.classList.remove("hidden");
+                try {
+                    const result = task();
+                    if (result instanceof Promise) {
+                        return await result;
+                    } else {
+                        return result;
+                    }
+                } finally {
+                    if (!dialog.classList.contains("hidden")) dialog.classList.add("hidden");
+                }
+            };
+
+            const setConfig = async () => {
+                const resp = await fetch(
+                    `/api/config/${roomId}`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            pwd: adminPassword,
+                            config: cfg,
+                        }),
+                        headers: {
+                            "Content-Type": "application/json",
+                        }
+                    }
+                )
+                const data = await resp.json();
+                if (data.code === 200) {
+                    // emit event
+                    await fetch(
+                        `/api/event/${roomId}`,
+                        {
+                            method: "POST",
+                            body: JSON.stringify({
+                                pwd: adminPassword,
+                                event: "config",
+                                data: JSON.stringify(cfg),
+                            }),
+                            headers: {
+                                "Content-Type": "application/json",
+                            }
+                        }
+                    )
+                }
+            };
+
+            const localToCfg = (usePlayerTime) => {
+                /** @type {HTMLMediaElement} */
+                const video = document.querySelector("#video");
+                const timeMs = Date.now() - (video.currentTime * 1000);
+                cfg.timeMs = usePlayerTime ? video.currentTime * 1000 : timeMs;
+                cfg.state = (video.paused) ? "paused" : "playing";
+            };
+
+            window.addEventListener("load", async () => {
+                // update room info
+                document.querySelector("#t-roomid").innerText = roomId;
+                const c = new URL(globalThis.location.href);
+                const url = new URL(`http://${c.host}/player.html`);
+                url.searchParams.set("roomId", roomId);
+                document.querySelector("#t-client-url").innerText = url.toString();
+                // bind action
+                document.querySelector("#btn-save-config").addEventListener("click", () => withLoadingDialog(async () => {
+                    // save config
+                    const txt = document.querySelector("#ta-video-source").value.split("\n");
+                    const sources = txt.map((line) => line.trim()).filter((s) => s);
+                    cfg.sources = sources;
+                    await setConfig();
+                }));
+                document.querySelector("#btn-sync-to-srv").addEventListener("click", () => withLoadingDialog(async () => {
+                    // sync config to server
+                    localToCfg((video.paused) ? true : false);
+                    await setConfig();
+                }));
+                document.querySelector("#btn-pause").addEventListener("click", () => withLoadingDialog(async () => {
+                    // stop and sync config to server
+                    document.querySelector("#video").pause();
+                    localToCfg(true);
+                    cfg.state = "paused";
+                    await setConfig();
+                }));
+                document.querySelector("#btn-play").addEventListener("click", () => withLoadingDialog(async () => {
+                    // play and sync config to server
+                    document.querySelector("#video").play();
+                    localToCfg(false);
+                    cfg.state = "playing";
+                    await setConfig();
+                }));
+                document.querySelector("#btn-sync-from-srv").addEventListener("click", () => withLoadingDialog(async () => {
+                    // sync config from server
+                    const resp = await fetch(`/api/config/${roomId}`);
+                    cfg = (await resp.json()).data;
+                    const video = document.querySelector("#video");
+                    if (cfg?.state === "playing") {
+                        // set player status
+                        const delayMs = 5000;
+                        const timeMs = cfg?.timeMs ?? Date.now()
+                        video.pause()
+                        video.currentTime = (Date.now() - timeMs + delayMs) / 1000;
+                        await new Promise(rs => setTimeout(rs, delayMs));
+                        video.play();
+                    } else {
+                        video.pause()
+                        const timeMs = cfg?.timeMs ?? 0;
+                        video.currentTime = timeMs / 1000;
+                    }
+                }));
+                // load config from server
+                withLoadingDialog(async () => {
+                    const resp = await fetch(`/api/config/${roomId}`);
+                    cfg = (await resp.json()).data;
+                    console.log("config", cfg);
+                    if (Array.isArray(cfg?.sources)) {
+                        document.querySelector("#ta-video-source").value = cfg.sources.join("\r\n");
+                        // parse first source
+                        const re = /^(?:(.+?)::)?(https?:\/\/.+)$/;
+                        const mt = re.exec(cfg.sources[0] ?? "");
+                        if (mt) {
+                            document.querySelector("#vdosor").value = mt[2];
+                            document.querySelector("#video").src = mt[2];
+                        }
+                    } else {
+                        document.querySelector("#ta-video-source").value = "";
+                    }
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <hr class="mt" />
+        <h1>Room ID 房间ID: <spam id="t-roomid"></spam></h1>
+        <label id="t-client-url"></label>
+        <hr class="mt" />
+        <h1>Room Config 房间配置</h1>
+        <label class="mt">Video Source 视频源 (one per line 每行一个, [name]::[url]):</label>
+        <textarea id="ta-video-source" style="max-width: 100%; width: 40rem; white-space: nowrap;" wrap="soft" rows="5" placeholder="[name]::[url]"></textarea>
+        <button class="mt" id="btn-save-config">Save 保存</button>
+        <hr class="mt" />
+        <h1>Player Control 播放控制</h1>
+        <label class="mt">Video Source 视频源 (local 本地):</label>
+        <div class="mt" style="display: flex; gap: 0.5rem; max-width: 100%; width: 40rem;">
+            <input id="vdosor" style="flex: 1 1 auto;" placeholder="Video Source 视频源" />
+            <button style="flex: 0 0 auto;">Change 切换</button>
+        </div>
+        <video class="mt" id="video" style="max-width: 100%; height: 22.5rem; width: 40rem;" controls></video>
+        <div class="mt" style="display: flex; gap: 0.5rem;">
+            <button id="btn-sync-to-srv">Sync to Server 同步到服务器</button>
+            <button id="btn-pause">Pause 暂停</button>
+            <button id="btn-play">Play 播放</button>
+            <button id="btn-sync-from-srv">Sync from Server 从服务器同步</button>
+        </div>
+        
+        <!-- Loading Dialog -->
+        <div class="dialog hidden" id="dialog_loading">
+            <div class="dialog_outter">
+                <div class="dialog_inner">
+                    <div style="padding: 1rem; background-color: #FFF; color: #000; border: #000 0.25rem solid;">Loading 加载中...</div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

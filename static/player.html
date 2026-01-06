@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <title>Player 播放器</title>
+        <style>
+            * {
+                padding: 0;
+                margin: 0;
+                box-sizing: border-box;
+            }
+            html, body {
+                width: 100%;
+                height: 100%;
+            }
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            button {
+                padding: 0.5rem;
+                background-color: #08D;
+                color: white;
+                border-width: 0;
+                border-radius: 0.5rem;
+                font-size: 1rem;
+                cursor: pointer;
+            }
+            textarea, input {
+                padding: 0.25rem;
+                border-radius: 0.5rem;
+                border-style: solid;
+            }
+            textarea, pre, code {
+                font-family: monospace;
+            }
+            hr {
+                width: 100%;
+                border: none;
+                border-top: 0.5rem double #08D;
+                color: #333;
+                overflow: hidden;
+                text-align: center;
+                height: 0.5rem;
+            }
+            .dialog {
+                position: fixed;
+                border: none;
+                margin: 0;
+                padding: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                width: 100%;
+                height: 100%;
+            }
+            .hidden {
+                display: none;
+            }
+            .dialog_outter {
+                width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .dialog_inner {
+                width: fit-content;
+                height: 100%;
+                display: flex;
+                align-items: center;
+            }
+            .mt {
+                margin-top: 0.5rem;
+            }
+        </style>
+        <script type="module">
+            const thisURL = new URL(globalThis.location.href);
+            const roomId = thisURL.searchParams.get("roomId") ?? "U";
+            let cfg = {
+                sources: [],
+                /** @type {"paused" | "playing"} */
+                state: "paused",
+                timeMs: Date.now(),
+            };
+            /** @type {EventSource} */
+            let sse = undefined;
+
+            const withLoadingDialog = async (task) => {
+                const dialog = document.querySelector("#dialog_loading");
+                if (dialog.classList.contains("hidden")) dialog.classList.remove("hidden");
+                try {
+                    const result = task();
+                    if (result instanceof Promise) {
+                        return await result;
+                    } else {
+                        return result;
+                    }
+                } finally {
+                    if (!dialog.classList.contains("hidden")) dialog.classList.add("hidden");
+                }
+            }
+
+            const parseSourceOption = () => {
+                /** @type {HTMLSelectElement} */
+                const select = document.querySelector("#vdosor");
+                const video = document.querySelector("#video");
+                const re = /^(?:(.+?)::)?(https?:\/\/.+)$/;
+                const playingSrc = video.src ?? "";
+                let selectOption = "";
+                select.innerHTML = "";
+                if (Array.isArray(cfg?.sources)) {
+                    cfg.sources.forEach((src) => {
+                        const mt = re.exec(src);
+                        if (mt) {
+                            const opt = document.createElement("option");
+                            opt.innerText = mt[1] ?? mt[2];
+                            opt.value = mt[2];
+                            if (playingSrc === src) {
+                                opt.selected = true;
+                                selectOption = src;
+                            }
+                            select.appendChild(opt);
+                        }
+                    });
+                    if (selectOption) {
+                        select.value = selectOption;
+                    } else {
+                        // no selected source, pause.
+                        video.pause();
+                        video.src = "";
+                    }
+                }
+            };
+
+            const syncWithServer = () => withLoadingDialog(async () => {
+                // only sync time
+                const video = document.querySelector("#video");
+                // sync from server
+                const delayMs = 5000;
+                const timeMs = cfg?.timeMs ?? Date.now()
+                if (cfg?.state === "playing") {
+                    // set player status
+                    video.pause()
+                    video.currentTime = (Date.now() - timeMs + delayMs) / 1000;
+                    await new Promise(rs => setTimeout(rs, delayMs));
+                    video.play();
+                } else {
+                    video.pause()
+                    await new Promise(rs => setTimeout(rs, 500));
+                    video.currentTime = timeMs / 1000;
+                    await new Promise(rs => setTimeout(rs, delayMs - 500));
+                    video.pause()
+                }
+            });
+
+            window.addEventListener("load", async () => {
+                document.querySelector("#t-roomid").innerText = roomId;
+                // load config from server
+                withLoadingDialog(async () => {
+                    const resp = await fetch(`/api/config/${roomId}`);
+                    cfg = (await resp.json()).data;
+                    console.log("config", cfg);
+                    parseSourceOption();
+                });
+                // bind action
+                document.querySelector("#btn-sel-source").addEventListener("click", () => {
+                    const video = document.querySelector("#video");
+                    const select = document.querySelector("#vdosor");
+                    const src = select.value ?? "";
+                    if (src) {
+                        // register sse
+                        if (sse) {
+                            sse.close();
+                        }
+                        sse = new EventSource(`/api/listen/${roomId}`);
+                        sse.addEventListener("config", (evt) => {
+                            cfg = JSON.parse(evt.data);
+                            syncWithServer();
+                        });
+                        // sync
+                        video.pause();
+                        video.src = src;
+                        video.classList.remove("hidden");
+                        syncWithServer();
+                    } else {
+                        video.src = "";
+                        video.classList.add("hidden");
+                    }
+                });
+                document.querySelector("#btn-refresh").addEventListener("click", () => withLoadingDialog(() => {
+                    globalThis.location.reload();
+                }));
+            });
+        </script>
+    </head>
+    <body>
+        <hr class="mt" />
+        <h1>Room ID 房间ID: <spam id="t-roomid"></spam></h1>
+        <hr class="mt" />
+        <h1>Video Source Select 视频源选择</h1>
+        <div class="mt" style="display: flex; gap: 0.5rem; max-width: 100%; width: 40rem;">
+            <select id="vdosor" style="flex: 1 1 auto;">
+                <!-- to be filled -->
+            </select>
+            <button id="btn-sel-source" style="flex: 0 0 auto;">Sync 同步</button>
+        </div>
+        <video class="mt hidden" id="video" style="max-width: 100%; height: 22.5rem; width: 40rem;" controls></video>
+        <button class="mt" id="btn-refresh" style="max-width: 100%; width: 40rem;" controls>Reload 刷新页面</button>
+        <!-- Loading Dialog -->
+        <div class="dialog hidden" id="dialog_loading">
+            <div class="dialog_outter">
+                <div class="dialog_inner">
+                    <div style="padding: 1rem; background-color: #FFF; color: #000; border: #000 0.25rem solid;">Loading 加载中...</div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
